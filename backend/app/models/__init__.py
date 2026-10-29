@@ -1,4 +1,4 @@
-from backend.app.models.delivery import Delivery
-from backend.app.models.agent import Agent
+from .agent import Agent
+from .delivery import Delivery, USSDSession
 
-__all__ = ["Delivery", "Agent"]
+__all__ = ["Agent", "Delivery", "USSDSession"]

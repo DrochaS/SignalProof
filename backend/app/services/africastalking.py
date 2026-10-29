@@ -9,6 +9,7 @@ Provides telephony integration for:
 """
 
 import json
+import hashlib
 import logging
 import os
 import re
@@ -17,7 +18,8 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Union
 
 import africastalking
-from flask import current_app
+import requests
+from flask import current_app, has_app_context
 
 logger = logging.getLogger("signalproof.telephony")
 if not logger.handlers:
@@ -72,6 +74,8 @@ class AfricasTalkingService:
         api_key: Optional[str] = None,
         sender_id: Optional[str] = None,
         mock_mode: Optional[bool] = None,
+        mock_network: Optional[bool] = None,
+        simulated_tower: str = "",
     ):
         self.username = username or os.getenv("AT_USERNAME", "sandbox")
         self.api_key = api_key or os.getenv("AT_API_KEY", "")
@@ -109,6 +113,14 @@ class AfricasTalkingService:
 
         self.sent_sms_log: List[Dict[str, Any]] = []
         self.sent_airtime_log: List[Dict[str, Any]] = []
+        self.mock_network = (
+            os.getenv("MOCK_NETWORK", "true").lower() in ("true", "1", "yes")
+            if mock_network is None
+            else mock_network
+        )
+        self.simulated_tower = simulated_tower or os.getenv(
+            "SIMULATED_CELL_TOWER_ID", ""
+        )
 
         self._sms_service = None
         self._airtime_service = None
@@ -134,6 +146,47 @@ class AfricasTalkingService:
             logger.info(
                 "SignalProof Africa's Talking service initialized in SIMULATION/SANDBOX mode (no external HTTP calls)."
             )
+
+    def get_cell_tower(self, phone_number: str) -> Dict[str, Any]:
+        """Return the subscriber's observed cell tower or a deterministic mock."""
+        normalized_phone = normalize_phone_number(phone_number)
+        if self.mock_network or self.is_mock:
+            tower = self.simulated_tower or self._deterministic_tower(normalized_phone)
+            return {
+                "phone_number": normalized_phone,
+                "cell_tower_id": tower,
+                "source": "simulated",
+            }
+
+        base_url = os.getenv(
+            "AT_BASE_URL", "https://api.africastalking.com"
+        ).rstrip("/")
+        try:
+            response = requests.get(
+                f"{base_url}/network-insights",
+                params={"phoneNumber": normalized_phone},
+                headers={"apiKey": self.api_key, "Accept": "application/json"},
+                timeout=15,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except requests.RequestException as exc:
+            logger.exception("Africa's Talking network insights failed")
+            raise RuntimeError("Network insights unavailable") from exc
+
+        return {
+            "phone_number": normalized_phone,
+            "cell_tower_id": payload.get("cellTowerId")
+            or payload.get("cell_tower_id"),
+            "source": "africas_talking",
+        }
+
+    @staticmethod
+    def _deterministic_tower(phone_number: str) -> str:
+        digest = hashlib.sha256(phone_number.encode()).hexdigest()
+        lac = int(digest[:4], 16) % 65535
+        cell = int(digest[4:8], 16) % 65535
+        return f"639-01-{lac}-{cell}"
 
     # --------------------------------------------------------------------------
     # CORE SMS APIS
@@ -236,40 +289,13 @@ class AfricasTalkingService:
                 "simulated": False,
             }
         except Exception as e:
-            logger.warning(
-                "Africa's Talking SMS API live call failed (%s). Triggering resilient fallback.",
-                str(e),
-            )
-            # Resilient fallback: return simulated success to prevent broken offline/USSD flow
-            mock_recipients = []
-            message_ids = []
-            for phone in normalized_recipients:
-                msg_id = f"ATXid_fallback_{uuid.uuid4().hex[:12]}"
-                message_ids.append(msg_id)
-                mock_recipients.append(
-                    {
-                        "cost": "KES 0.8000",
-                        "messageId": msg_id,
-                        "number": phone,
-                        "status": "Success",
-                        "statusCode": 101,
-                    }
-                )
-
-            mock_response = {
-                "SMSMessageData": {
-                    "Message": f"Fallback: Sent to {len(normalized_recipients)}/{len(normalized_recipients)}",
-                    "Recipients": mock_recipients,
-                }
-            }
+            logger.error("Africa's Talking SMS send error: %s", str(e))
             return {
-                "success": True,
-                "message": message,
+                "success": False,
+                "error": str(e),
                 "recipients": normalized_recipients,
-                "message_ids": message_ids,
-                "raw_response": mock_response,
-                "simulated": True,
-                "fallback_error": str(e),
+                "message": message,
+                "simulated": False,
             }
 
     # --------------------------------------------------------------------------
@@ -380,37 +406,14 @@ class AfricasTalkingService:
                 "error": error_msg,
             }
         except Exception as e:
-            logger.warning(
-                "Africa's Talking Airtime live call failed (%s). Triggering resilient fallback.",
-                str(e),
-            )
-            fallback_request_id = f"ATQid_fallback_{uuid.uuid4().hex[:12]}"
-            fallback_response = {
-                "errorMessage": "None",
-                "numSent": 1,
-                "totalAmount": f"{currency_code} {num_amount:.2f}",
-                "totalDiscount": f"{currency_code} 0.00",
-                "responses": [
-                    {
-                        "phoneNumber": normalized_phone,
-                        "errorMessage": "None",
-                        "amount": f"{currency_code} {num_amount:.2f}",
-                        "status": "Sent",
-                        "requestId": fallback_request_id,
-                        "discount": f"{currency_code} 0.00",
-                    }
-                ],
-            }
+            logger.error("Africa's Talking Airtime send error: %s", str(e))
             return {
-                "success": True,
+                "success": False,
                 "phone_number": normalized_phone,
                 "amount": num_amount,
                 "currency": currency_code,
-                "transaction_id": fallback_request_id,
-                "status": "Sent",
-                "raw_response": fallback_response,
-                "simulated": True,
-                "fallback_error": str(e),
+                "error": str(e),
+                "simulated": False,
             }
 
     # --------------------------------------------------------------------------
@@ -538,6 +541,10 @@ _at_service_instance: Optional[AfricasTalkingService] = None
 def get_africastalking_service(force_new: bool = False) -> AfricasTalkingService:
     """Retrieve or create the Africa's Talking service instance."""
     global _at_service_instance
+    if not force_new and has_app_context():
+        app_service = current_app.extensions.get("signalproof_at_service")
+        if app_service is not None:
+            return app_service
     if _at_service_instance is None or force_new:
         _at_service_instance = AfricasTalkingService()
     return _at_service_instance

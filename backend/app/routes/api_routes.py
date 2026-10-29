@@ -15,14 +15,17 @@ Endpoints:
 """
 
 import logging
+import uuid
+
 from flask import Blueprint, jsonify, request
-from backend.app.models.delivery import Delivery
-from backend.app.services.africastalking import (
+from ..extensions import db
+from ..models.agent import Agent
+from ..models.delivery import Delivery
+from ..services.africastalking import (
     get_africastalking_service,
     normalize_phone_number,
 )
-from backend.app.services.delivery_service import get_delivery_service
-from backend.app.extensions import db
+from ..services.delivery_service import get_delivery_service
 
 logger = logging.getLogger("signalproof.api")
 
@@ -57,6 +60,34 @@ def telephony_status():
 # DELIVERIES CRUD & LIFECYCLE
 # --------------------------------------------------------------------------
 
+@api_bp.route("/agents", methods=["POST"])
+def create_agent():
+    """Register an agent for delivery assignment and USSD verification."""
+    data = request.get_json(silent=True) or {}
+    name = data.get("name")
+    phone_number = data.get("phone_number")
+    registered_tower = data.get("registered_cell_tower_id")
+    if not name or not phone_number:
+        return jsonify(
+            {"success": False, "error": "Missing required fields: name and phone_number"}
+        ), 400
+
+    normalized_phone = normalize_phone_number(phone_number)
+    if Agent.query.filter_by(phone_number=normalized_phone).first():
+        return jsonify({"success": False, "error": "Agent already exists"}), 409
+
+    agent = Agent(
+        id=str(data.get("id") or f"AG-{uuid.uuid4().hex[:12].upper()}"),
+        name=name.strip(),
+        phone_number=normalized_phone,
+        registered_cell_tower_id=registered_tower,
+        current_tower_id=registered_tower,
+    )
+    db.session.add(agent)
+    db.session.commit()
+    return jsonify(agent.to_dict()), 201
+
+
 @api_bp.route("/deliveries", methods=["GET"])
 def list_deliveries():
     """List deliveries with optional filtering by status, agent, or buyer."""
@@ -90,18 +121,23 @@ def create_delivery():
     """Create a new delivery protected by SignalProof escrow."""
     data = request.get_json() or {}
 
-    buyer_name = data.get("buyer_name")
+    buyer_name = data.get("buyer_name") or "Buyer"
     buyer_phone = data.get("buyer_phone")
 
-    if not buyer_name or not buyer_phone:
+    if not buyer_phone:
         return jsonify(
             {
                 "success": False,
-                "error": "Missing required fields: buyer_name and buyer_phone",
+                "error": "Missing required field: buyer_phone",
             }
         ), 400
 
     try:
+        destination_tower = (
+            data.get("destination_tower_id")
+            or data.get("destination_cell_tower_id")
+            or "TOW-NBO-042"
+        )
         delivery_svc = get_delivery_service()
         delivery = delivery_svc.create_delivery(
             buyer_name=buyer_name,
@@ -110,11 +146,17 @@ def create_delivery():
             agent_name=data.get("agent_name"),
             agent_phone=data.get("agent_phone"),
             package_description=data.get("package_description", "Parcel Delivery"),
-            destination_zone=data.get("destination_zone", "Westlands Zone"),
-            destination_tower_id=data.get("destination_tower_id", "TOW-NBO-042"),
+            destination_zone=data.get(
+                "destination_zone", data.get("zone_name", "Westlands Zone")
+            ),
+            destination_tower_id=destination_tower,
             payout_amount=float(data.get("payout_amount", 50.0)),
             currency=data.get("currency", "KES"),
             custom_otp=data.get("otp_code"),
+            delivery_code=data.get("delivery_code"),
+            destination_cell_tower_id=data.get("destination_cell_tower_id"),
+            zone_name=data.get("zone_name"),
+            delivery_fee=data.get("delivery_fee"),
         )
 
         return jsonify(

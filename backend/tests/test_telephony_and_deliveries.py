@@ -4,6 +4,7 @@ import pytest
 from backend.app import create_app
 from backend.app.config import TestConfig
 from backend.app.extensions import db
+from backend.app.models.agent import Agent
 from backend.app.models.delivery import Delivery
 from backend.app.services.africastalking import (
     AfricasTalkingService,
@@ -314,3 +315,79 @@ def test_api_telephony_endpoints(client):
     stats_resp = client.get("/api/stats")
     assert stats_resp.status_code == 200
     assert "total_deliveries" in stats_resp.get_json()
+
+
+def test_ussd_requires_matching_network_and_verifies_delivery(app, client):
+    with app.app_context():
+        agent = Agent(
+            id="AG-USSD",
+            name="USSD Agent",
+            phone_number="+254722000111",
+            registered_cell_tower_id="TOW-NBO-042",
+        )
+        db.session.add(agent)
+        db.session.commit()
+        service = get_africastalking_service()
+        service.simulated_tower = "TOW-NBO-042"
+
+    create_response = client.post(
+        "/api/deliveries",
+        json={
+            "buyer_name": "USSD Buyer",
+            "buyer_phone": "0712345678",
+            "agent_id": "AG-USSD",
+            "destination_tower_id": "TOW-NBO-042",
+            "delivery_code": "4820",
+            "otp_code": "4821",
+        },
+    )
+    assert create_response.status_code == 201
+
+    service = app.extensions["signalproof_at_service"]
+    service.simulated_tower = "TOW-NBO-999"
+    mismatch_response = client.post(
+        "/ussd/callback",
+        data={
+            "sessionId": "ussd-network-mismatch",
+            "phoneNumber": "0722000111",
+            "text": "4820",
+        },
+    )
+    assert mismatch_response.get_data(as_text=True).startswith("END Location Mismatch")
+
+    service.simulated_tower = "TOW-NBO-042"
+    first_response = client.post(
+        "/ussd/callback",
+        data={
+            "sessionId": "ussd-network-1",
+            "phoneNumber": "0722000111",
+            "text": "",
+        },
+    )
+    assert first_response.status_code == 200
+    assert first_response.get_data(as_text=True).startswith("CON ")
+
+    arrival_response = client.post(
+        "/ussd/callback",
+        data={
+            "sessionId": "ussd-network-1",
+            "phoneNumber": "0722000111",
+            "text": "4820",
+        },
+    )
+    assert "Location Verified" in arrival_response.get_data(as_text=True)
+
+    otp_response = client.post(
+        "/ussd/callback",
+        data={
+            "sessionId": "ussd-network-1",
+            "phoneNumber": "0722000111",
+            "text": "4821",
+        },
+    )
+    assert otp_response.get_data(as_text=True).startswith("END Delivery Verified!")
+    delivery = client.get(
+        f"/api/deliveries/{create_response.get_json()['delivery']['id']}"
+    ).get_json()["delivery"]
+    assert delivery["status"] == "COMPLETED"
+    assert delivery["airtime_status"] == "DISBURSED"

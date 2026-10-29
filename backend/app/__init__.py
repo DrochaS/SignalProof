@@ -1,34 +1,50 @@
-"""SignalProof Flask Application Factory."""
+import os
 
-import logging
-from flask import Flask
-from backend.app.config import Config
-from backend.app.extensions import cors, db
+from flask import Flask, jsonify
+
+from .extensions import cors, db, migrate
+from .config import config_by_name
+from .routes import register_blueprints
+
+# Import models so they are registered with SQLAlchemy metadata before create_all().
+from .models import Agent, Delivery, USSDSession  # noqa: F401
 
 
-def create_app(config_class=Config):
-    """Application factory for SignalProof backend."""
+def create_app(config_name=None):
+    if config_name is None:
+        config_name = os.getenv("FLASK_ENV", "development")
     app = Flask(__name__)
-    app.config.from_object(config_class)
+    if isinstance(config_name, str):
+        app.config.from_object(config_by_name[config_name])
+    else:
+        app.config.from_object(config_name)
 
-    # Initialize extensions
     db.init_app(app)
+    migrate.init_app(app, db)
     cors.init_app(app)
 
-    # Register blueprints
-    from backend.app.routes.api_routes import api_bp
-    from backend.app.routes.ussd_routes import ussd_bp
+    # Wire up the AfricasTalking service with app config (credentials, mock/tower settings).
+    from .services.africastalking import AfricasTalkingService
 
-    app.register_blueprint(api_bp)
-    app.register_blueprint(ussd_bp)
+    mock_setting = str(app.config.get("MOCK_AT_SERVICES", "auto")).lower()
+    at_service = AfricasTalkingService(
+        username=app.config.get("AT_USERNAME"),
+        api_key=app.config.get("AT_API_KEY"),
+        sender_id=app.config.get("AT_SENDER_ID"),
+        mock_mode=True if mock_setting in ("true", "1", "yes") else None,
+        mock_network=app.config.get("MOCK_NETWORK", True),
+        simulated_tower=app.config.get("SIMULATED_CELL_TOWER_ID", ""),
+    )
+    app.at_service = at_service
+    app.extensions["signalproof_at_service"] = at_service
 
-    # Configure logging
-    if not app.debug:
-        logging.basicConfig(level=logging.INFO)
+    register_blueprints(app)
 
-    # Ensure tables exist
+    @app.route("/health", methods=["GET"])
+    def health():
+        return jsonify({"status": "ok", "service": "signalproof-ussd"}), 200
+
     with app.app_context():
-        import backend.app.models  # noqa: F401
         db.create_all()
 
     return app

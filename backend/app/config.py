@@ -21,16 +21,22 @@ class Config:
 
     # Africa's Talking Telephony Configuration
     AT_USERNAME = os.getenv("AT_USERNAME", "sandbox")
-    AT_API_KEY = os.getenv(
-        "AT_API_KEY",
-        "atsk_a70e059f23298d31f0b2ef095effc4691bf3840727f970b2bc128aa6daaeaf529365f0c7",
-    )
+    AT_API_KEY = os.getenv("AT_API_KEY", "")
     AT_SENDER_ID = os.getenv("AT_SENDER_ID", None)
     AT_ENVIRONMENT = os.getenv("AT_ENVIRONMENT", "sandbox")
 
     # Default Airtime & Currency Settings
     DEFAULT_AIRTIME_AMOUNT = float(os.getenv("DEFAULT_AIRTIME_AMOUNT", "50.0"))
     DEFAULT_CURRENCY = os.getenv("DEFAULT_CURRENCY", "KES")
+
+    # USSD and network telemetry
+    USSD_CODE = os.getenv("USSD_CODE", "*384*#")
+    DELIVERY_FEE_DEFAULT = int(os.getenv("DELIVERY_FEE_DEFAULT", "50"))
+    CURRENCY_CODE = os.getenv("CURRENCY_CODE", DEFAULT_CURRENCY)
+    OTP_LENGTH = int(os.getenv("OTP_LENGTH", "4"))
+    MOCK_NETWORK = os.getenv("MOCK_NETWORK", "true").lower() in ("true", "1", "yes")
+    SIMULATED_CELL_TOWER_ID = os.getenv("SIMULATED_CELL_TOWER_ID", "")
+    SESSION_TTL_MINUTES = int(os.getenv("SESSION_TTL_MINUTES", "10"))
 
     # Mock Mode: 'true' / '1' forces simulation, 'false' forces real API,
     # 'auto' automatically uses simulation when API key is missing or dummy
@@ -43,3 +49,21 @@ class TestConfig(Config):
     TESTING = True
     SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
     MOCK_AT_SERVICES = "true"
+
+
+TestingConfig = TestConfig
+
+
+class DevelopmentConfig(Config):
+    DEBUG = True
+
+
+class ProductionConfig(Config):
+    DEBUG = False
+
+
+config_by_name = {
+    "development": DevelopmentConfig,
+    "testing": TestConfig,
+    "production": ProductionConfig,
+}
