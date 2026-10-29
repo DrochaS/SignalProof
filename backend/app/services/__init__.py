@@ -1,11 +1,21 @@
-from backend.app.services.africastalking import (
-    AfricasTalkingService,
-    get_africastalking_service,
-    normalize_phone_number,
-    send_otp_sms,
-    send_delivery_receipt_sms,
-    disburse_airtime,
-)
+try:
+    from backend.app.services.africastalking import (
+        AfricasTalkingService,
+        get_africastalking_service,
+        normalize_phone_number,
+        send_otp_sms,
+        send_delivery_receipt_sms,
+        disburse_airtime,
+    )
+except ModuleNotFoundError:
+    from app.services.africastalking import (
+        AfricasTalkingService,
+        get_africastalking_service,
+        normalize_phone_number,
+        send_otp_sms,
+        send_delivery_receipt_sms,
+        disburse_airtime,
+    )
 
 __all__ = [
     "AfricasTalkingService",

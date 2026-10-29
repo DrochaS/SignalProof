@@ -1,65 +1,79 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import LiveDeliveryTable from './components/LiveDeliveryTable'
 import DispatchCreatorModal from './components/DispatchCreatorModal'
 import TelemetryLogFeed from './components/TelemetryLogFeed'
+import { createDelivery, fetchDeliveries } from './services/api'
+
+const STATUS_MAP = {
+  PENDING: 'pending',
+  LOCATION_VERIFIED: 'verified',
+  OTP_SENT: 'en_route',
+  COMPLETED: 'verified',
+  FAILED: 'mismatch',
+  CANCELLED: 'pending',
+}
+
+function normalizeDelivery(delivery) {
+  const status = STATUS_MAP[delivery.status] || 'pending'
+
+  return {
+    id: String(delivery.id ?? delivery.tracking_number ?? delivery.delivery_code ?? 'N/A'),
+    agent: delivery.agent_name || 'Unassigned agent',
+    phone: delivery.agent_phone || delivery.buyer_phone || '',
+    destination: delivery.destination_zone || delivery.zone_name || 'Unknown zone',
+    cellTower: delivery.destination_cell_tower_id || delivery.destination_tower_id || 'N/A',
+    status,
+    eta: delivery.completed_at ? 'Delivered' : 'Live',
+    distance: delivery.delivery_fee ? `${delivery.delivery_fee} KES` : '—',
+  }
+}
 
 function App() {
   const [modalOpen, setModalOpen] = useState(false)
-  const [deliveries, setDeliveries] = useState([
-    {
-      id: 'DSP-001',
-      agent: 'James Mwangi',
-      phone: '+254 712 345 678',
-      destination: 'Westlands Zone',
-      cellTower: 'LAC-4421/CID-8812',
-      status: 'verified',
-      eta: '14:30',
-      distance: '12m',
-    },
-    {
-      id: 'DSP-002',
-      agent: 'Sarah Njeri',
-      phone: '+254 722 123 456',
-      destination: 'Kawangware Hub',
-      cellTower: 'LAC-4421/CID-8815',
-      status: 'en_route',
-      eta: '15:15',
-      distance: '1.2km',
-    },
-    {
-      id: 'DSP-003',
-      agent: 'Peter Otieno',
-      phone: '+254 733 987 654',
-      destination: 'Kikuyu Drop-off',
-      cellTower: 'LAC-4430/CID-9021',
-      status: 'pending',
-      eta: '16:00',
-      distance: '3.5km',
-    },
-    {
-      id: 'DSP-004',
-      agent: 'Grace Akinyi',
-      phone: '+254 741 234 567',
-      destination: 'Karen Zone',
-      cellTower: 'LAC-4410/CID-8710',
-      status: 'verified',
-      eta: '14:45',
-      distance: '8m',
-    },
-    {
-      id: 'DSP-005',
-      agent: 'David Kiprotich',
-      phone: '+254 755 876 543',
-      destination: 'Thika Road Depot',
-      cellTower: 'LAC-4450/CID-9100',
-      status: 'mismatch',
-      eta: '15:00',
-      distance: '450m',
-    },
-  ])
+  const [deliveries, setDeliveries] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
-  const handleCreateDispatch = (newDispatch) => {
-    setDeliveries((prev) => [newDispatch, ...prev])
+  useEffect(() => {
+    const loadDeliveries = async () => {
+      try {
+        setLoading(true)
+        const apiDeliveries = await fetchDeliveries()
+        setDeliveries(apiDeliveries.map(normalizeDelivery))
+        setError('')
+      } catch (err) {
+        setError(err.message || 'Unable to load deliveries')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    loadDeliveries()
+  }, [])
+
+  const handleCreateDispatch = async (newDispatch) => {
+    try {
+      const payload = {
+        buyer_name: newDispatch.buyerName || 'Buyer',
+        buyer_phone: newDispatch.agentPhone,
+        agent_name: newDispatch.agentName,
+        agent_phone: newDispatch.agentPhone,
+        destination_zone: newDispatch.destination,
+        destination_tower_id: newDispatch.cellTower,
+        destination_cell_tower_id: newDispatch.cellTower,
+        payout_amount: 50,
+        currency: 'KES',
+      }
+
+      const createdDelivery = await createDelivery(payload)
+      const next = normalizeDelivery(createdDelivery)
+      setDeliveries((prev) => [next, ...prev])
+      setError('')
+    } catch (err) {
+      setError(err.message || 'Unable to create dispatch')
+      return
+    }
+
     setModalOpen(false)
   }
 
@@ -95,6 +109,18 @@ function App() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {error && (
+          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {error}
+          </div>
+        )}
+
+        {loading && deliveries.length === 0 && (
+          <div className="mb-4 rounded-lg border border-sp-border bg-sp-bg px-4 py-3 text-sm text-sp-muted">
+            Loading deliveries…
+          </div>
+        )}
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Left Column: Live Delivery Table */}
           <div className="lg:col-span-2">

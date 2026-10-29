@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 const STATUS_LABELS = {
   verified: 'Verified',
@@ -17,6 +17,10 @@ const STATUS_COLORS = {
 export default function LiveDeliveryTable({ initialDeliveries = [] }) {
   const [deliveries, setDeliveries] = useState(initialDeliveries)
   const [search, setSearch] = useState('')
+
+  useEffect(() => {
+    setDeliveries(initialDeliveries)
+  }, [initialDeliveries])
 
   const filtered = deliveries.filter(
     (d) =>
