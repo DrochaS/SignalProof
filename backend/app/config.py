@@ -21,7 +21,10 @@ class Config:
 
     # Africa's Talking Telephony Configuration
     AT_USERNAME = os.getenv("AT_USERNAME", "sandbox")
-    AT_API_KEY = os.getenv("AT_API_KEY", "")
+    AT_API_KEY = os.getenv(
+        "AT_API_KEY",
+        "atsk_a70e059f23298d31f0b2ef095effc4691bf3840727f970b2bc128aa6daaeaf529365f0c7",
+    )
     AT_SENDER_ID = os.getenv("AT_SENDER_ID", None)
     AT_ENVIRONMENT = os.getenv("AT_ENVIRONMENT", "sandbox")
 
