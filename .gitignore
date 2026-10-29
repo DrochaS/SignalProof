@@ -1,16 +1,35 @@
-# Python
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
-*.pyo
-*.pdb
-.venv/
+*$py.class
+
+# Virtual Environments
 venv/
+.venv/
+backend/venv/
+backend/.venv/
+ENV/
+env/
+
+# Environment variables
 .env
-*.db
-sqlite:///
+backend/.env
+frontend/.env.local
+frontend/.env.*.local
 
-# VS Code
+# IDE & OS
 .vscode/
-
-# OS
+.idea/
+*.swp
+*.swo
+*~
 .DS_Store
+
+# Node / Frontend
+frontend/node_modules/
+frontend/dist/
+
+# SQLite / Database
+*.db
+*.sqlite3
+backend/instance/
