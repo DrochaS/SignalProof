@@ -14,9 +14,12 @@ class Config:
     """Base application configuration."""
 
     SECRET_KEY = os.getenv("SECRET_KEY", "signalproof-hackathon-secret-key-2026")
-    SQLALCHEMY_DATABASE_URI = os.getenv(
+    database_url = os.getenv(
         "DATABASE_URL", f"sqlite:///{backend_dir / 'signalproof.db'}"
     )
+    if database_url.startswith("postgres://"):
+        database_url = database_url.replace("postgres://", "postgresql://", 1)
+    SQLALCHEMY_DATABASE_URI = database_url
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
     # Africa's Talking Telephony Configuration

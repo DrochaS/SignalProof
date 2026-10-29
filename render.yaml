@@ -1,0 +1,47 @@
+databases:
+  - name: signalproof-db
+    databaseName: signalproof
+    user: signalproof
+    plan: free
+
+services:
+  - type: web
+    name: signalproof-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: gunicorn backend.run:app --bind 0.0.0.0:$PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.3
+      - key: FLASK_ENV
+        value: production
+      - key: FLASK_DEBUG
+        value: "false"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: signalproof-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: AT_USERNAME
+        value: sandbox
+      - key: AT_ENVIRONMENT
+        value: sandbox
+      - key: MOCK_AT_SERVICES
+        value: "true"
+      - key: MOCK_NETWORK
+        value: "true"
+
+  - type: web
+    name: signalproof-frontend
+    runtime: static
+    buildCommand: cd frontend && npm ci && npm run build
+    staticPublishPath: frontend/dist
+    envVars:
+      - key: VITE_API_BASE_URL
+        fromService:
+          type: web
+          name: signalproof-api
+          property: host
