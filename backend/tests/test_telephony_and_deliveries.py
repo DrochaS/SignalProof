@@ -21,6 +21,13 @@ from backend.app.services.delivery_service import DeliveryService
 def app():
     """Create application configured for testing."""
     test_app = create_app(TestConfig)
+    # Ensure Africa's Talking service uses mock mode during test runs
+    import backend.app.services.africastalking as at_mod
+    at_mod._at_service_instance = AfricasTalkingService(
+        username="sandbox",
+        api_key="mock_test_key",
+        mock_mode=True,
+    )
     with test_app.app_context():
         db.create_all()
         yield test_app

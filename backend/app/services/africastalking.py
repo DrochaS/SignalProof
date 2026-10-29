@@ -83,9 +83,22 @@ class AfricasTalkingService:
 
         env_mock = os.getenv("MOCK_AT_SERVICES", "auto").lower()
 
+        # Check Flask app context if available
+        flask_mock = None
+        try:
+            if current_app:
+                if current_app.config.get("TESTING") or str(
+                    current_app.config.get("MOCK_AT_SERVICES", "")
+                ).lower() in ("true", "1", "yes"):
+                    flask_mock = True
+        except RuntimeError:
+            pass
+
         # Decide if running in mock/simulation mode
         if mock_mode is not None:
             self.is_mock = mock_mode
+        elif flask_mock is not None:
+            self.is_mock = flask_mock
         elif env_mock in ("true", "1", "yes"):
             self.is_mock = True
         elif not self.api_key or self.api_key in (
